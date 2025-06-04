@@ -28,7 +28,7 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
     except Exception as e:
         st.warning(f"Error configuring Gemini API: {e}. OCR will not work.")
         print(f"Error configuring Gemini API: {e}")
-        GEMINI_API_KEY = None # Disable OCR if config fails
+        GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", None) # Disable OCR if config fails
 else:
     st.warning("Gemini API Key not configured. OCR functionality will be disabled. Set it in Streamlit secrets, as an environment variable, or directly in the code for testing.")
     GEMINI_API_KEY = None
