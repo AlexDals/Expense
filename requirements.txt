@@ -1,0 +1,10 @@
+streamlit
+streamlit-authenticator>=0.3.0
+pandas
+Pillow
+bcrypt
+supabase
+openpyxl
+google-cloud-vision
+PyMuPDF
+google-generativeai
