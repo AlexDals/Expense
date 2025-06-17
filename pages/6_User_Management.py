@@ -4,20 +4,15 @@ import pandas as pd
 import streamlit_authenticator as stauth
 import bcrypt
 
-# The redundant st.set_page_config() call has been removed.
-
 st.title("⚙️ User Management")
 
-# --- Authentication and Role Check ---
-if 'authentication_status' not in st.session_state or not st.session_state['authentication_status']:
-    st.warning("Please log in to access this page.")
-    st.stop()
-elif st.session_state.get("role") != 'admin':
+# --- Authentication Guard ---
+if not st.session_state.get("authentication_status") or st.session_state.get("role") != 'admin':
     st.error("You do not have permission to access this page.")
     st.stop()
 
 # --- Admin User Creation Form ---
-with st.expander("Create a New User", expanded=False):
+with st.expander("➕ Create a New User"):
     with st.form("admin_create_user_form", clear_on_submit=True):
         st.subheader("New User Details")
         new_name = st.text_input("Full Name*")
@@ -34,11 +29,9 @@ with st.expander("Create a New User", expanded=False):
             else:
                 try:
                     password_bytes = new_password.encode('utf-8')
-                    salt = bcrypt.gensalt()
-                    hashed_password = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
-                    
+                    hashed_password = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode('utf-8')
                     if su.register_user(new_username, new_name, new_email, hashed_password, new_role):
-                        st.success(f"User '{new_username}' created successfully with role '{new_role}'.")
+                        st.success(f"User '{new_username}' created successfully!")
                         st.rerun()
                 except Exception as e:
                     st.error(f"A critical error occurred during user creation: {e}")
@@ -47,8 +40,6 @@ st.markdown("---")
 
 # --- Existing User Editing Logic ---
 st.subheader("Edit Existing Users")
-st.info("Edit user roles and assign approvers below. Changes are saved automatically.")
-
 all_users_df = su.get_all_users()
 approvers = su.get_all_approvers()
 approver_dict = {approver['name']: approver['id'] for approver in approvers}
@@ -58,31 +49,55 @@ if all_users_df.empty:
     st.warning("No users found.")
     st.stop()
 
+# Prepare dataframe for editing
 id_to_name_map = {v: k for k, v in approver_dict.items()}
 all_users_df['approver_name'] = all_users_df['approver_id'].map(id_to_name_map).fillna("None")
+# Ensure department column exists and fill null values for the editor
+if 'department' not in all_users_df.columns:
+    all_users_df['department'] = None
+all_users_df['department'] = all_users_df['department'].fillna("")
 
+
+# Use a separate dataframe for editing to compare changes
 edited_df = st.data_editor(
     all_users_df,
     column_config={
         "id": None, "approver_id": None,
         "role": st.column_config.SelectboxColumn("Role", options=["user", "approver", "admin"], required=True),
-        "approver_name": st.column_config.SelectboxColumn("Approver", options=approver_names, required=True),
+        "approver_name": st.column_config.SelectboxColumn("Approver", options=approver_names),
+        "department": st.column_config.TextColumn("Department", required=False) # NEW column
     },
     hide_index=True,
     key="user_editor"
 )
 
-if not all_users_df.equals(edited_df):
-    diff = all_users_df.merge(edited_df, indicator=True, how='outer').loc[lambda x : x['_merge']=='right_only']
+if st.button("Save All User Changes"):
+    # Find changed rows by comparing the data editor's state with the original dataframe
+    changes = []
+    original_df_indexed = all_users_df.set_index('id')
+    edited_df_indexed = edited_df.set_index('id')
     
-    for index, row in diff.iterrows():
-        user_id = row['id']
-        new_role = row['role']
-        new_approver_name = row['approver_name']
-        new_approver_id = approver_dict.get(new_approver_name)
-        
-        if su.update_user_details(user_id, new_role, new_approver_id):
-            st.success(f"Details for user '{row['username']}' updated!")
-            st.rerun()
-        else:
-            st.error(f"Failed to update details for user '{row['username']}'.")
+    # Iterate through the edited dataframe to find changes
+    for user_id, edited_row in edited_df_indexed.iterrows():
+        original_row = original_df_indexed.loc[user_id]
+        if not original_row.equals(edited_row):
+            changes.append(edited_row)
+    
+    if not changes:
+        st.info("No changes to save.")
+    else:
+        with st.spinner("Saving..."):
+            all_success = True
+            for changed_row in changes:
+                user_id = changed_row.name # Get ID from the index
+                new_approver_id = approver_dict.get(changed_row['approver_name'])
+                
+                # Call the updated details function
+                if not su.update_user_details(user_id, changed_row['role'], new_approver_id, changed_row['department']):
+                    all_success = False
+            
+            if all_success:
+                st.success("All changes saved successfully!")
+                st.rerun()
+            else:
+                st.error("One or more changes could not be saved.")
